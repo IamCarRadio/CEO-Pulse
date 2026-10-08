@@ -1,0 +1,6 @@
+{
+  "name": "CEO Pulse",
+  "description": "CEO-level clinic analytics dashboard for multi-branch clinic groups with role-gated access and executive oversight.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

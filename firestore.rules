@@ -1,0 +1,177 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // HELPER FUNCTIONS & ROLE-BASED ACCESS CONTROL (RBAC) GATES
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return request.auth.token.email != null ? request.auth.token.email.lower() : '';
+    }
+
+    // A valid user has a document in /roles/$(authEmail())
+    function hasRoleDoc() {
+      return isSignedIn() && authEmail() != '' &&
+        exists(/databases/$(database)/documents/roles/$(authEmail()));
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/roles/$(authEmail())).data.role;
+    }
+
+    // super_admin: Full access (Upload, delete uploads, Package Values settings, all dashboards, AI, Users & Access)
+    function isSuperAdmin() {
+      return hasRoleDoc() && getUserRole() == 'super_admin';
+    }
+
+    // ceo: View-only access (Dashboard, Services, Pharmacy, AI Summary, Ask).
+    // Upload, delete, and Settings are blocked by Firestore security rules.
+    function isCeo() {
+      return hasRoleDoc() && getUserRole() == 'ceo';
+    }
+
+    // Any authorized user (super_admin or ceo)
+    function isAuthorizedUser() {
+      return isSuperAdmin() || isCeo();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // =========================================================================
+    // 1. ROLES COLLECTION (/roles/<email>)
+    // Document ID = user's lowercase email
+    // Fields: email (string), role ("super_admin" | "ceo"), mustChangePassword (bool)
+    // =========================================================================
+    match /roles/{emailKey} {
+      // Any authenticated user can read their own role document to verify access.
+      // Super admin can read all role documents.
+      allow get: if isSignedIn() && (
+        (authEmail() != '' && authEmail() == emailKey.lower()) ||
+        isSuperAdmin()
+      );
+
+      // Only super_admin can list all roles (in Users & Access screen)
+      allow list: if isSuperAdmin();
+
+      // Users can update ONLY their own mustChangePassword field upon changing their password.
+      // Super admin can manage role documents.
+      allow update: if (
+        isSignedIn() && authEmail() == emailKey.lower() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'updatedAt']) &&
+        request.resource.data.mustChangePassword is bool
+      ) || isSuperAdmin();
+
+      // Initial account creation / management:
+      // A user may create their own role doc during initial setup, or super_admin
+      allow create: if (
+        isSignedIn() && authEmail() == emailKey.lower() &&
+        request.resource.data.keys().hasAll(['email', 'role', 'mustChangePassword']) &&
+        request.resource.data.role in ['super_admin', 'ceo']
+      ) || isSuperAdmin();
+
+      // Deletion of roles is restricted exclusively to super_admin
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 2. UPLOAD HISTORY AUDIT TRAIL (/upload_history/<uploadId>)
+    // super_admin: full access (create, read, update, delete)
+    // ceo: VIEW-ONLY (read). Create, update, delete are strictly blocked.
+    // =========================================================================
+    match /upload_history/{uploadId} {
+      // Both super_admin and ceo can view historical uploads in dashboard/reports
+      allow get, list: if isAuthorizedUser();
+
+      // CEO is view-only: blocked by security rules
+      // Only super_admin can upload new datasets
+      allow create: if isSuperAdmin() &&
+        isValidId(uploadId) &&
+        request.resource.data.keys().hasAll(['uploadId', 'fileName', 'reportType', 'branch', 'reportDate', 'rowCount', 'uploadedBy']) &&
+        request.resource.data.uploadId is string &&
+        request.resource.data.fileName is string &&
+        request.resource.data.reportType in ['SERVICE_SALES', 'PHARMACY_SALES'] &&
+        request.resource.data.rowCount is number &&
+        request.resource.data.rowCount >= 0;
+
+      allow update: if isSuperAdmin() &&
+        request.resource.data.uploadId == resource.data.uploadId;
+
+      // CEO is view-only: blocked by security rules
+      // Only super_admin can delete uploads
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 3. RAW SPREADSHEET ROW DATA (/raw_uploads/<rowId>)
+    // super_admin: full access (write, replace, delete)
+    // ceo: VIEW-ONLY (read). Write and delete are strictly blocked.
+    // =========================================================================
+    match /raw_uploads/{rowId} {
+      allow get, list: if isAuthorizedUser();
+
+      // Blocked for CEO, allowed for super_admin
+      allow create: if isSuperAdmin() &&
+        isValidId(rowId) &&
+        request.resource.data.keys().hasAll(['uploadId', 'branch', 'reportDate']) &&
+        request.resource.data.uploadId is string;
+
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 4. PACKAGE RECTIFICATION SETTINGS (/package_settings/<settingId>)
+    // super_admin: full access (manage per-session values)
+    // ceo: VIEW-ONLY (read). Create, update, delete are strictly blocked.
+    // =========================================================================
+    match /package_settings/{settingId} {
+      allow get, list: if isAuthorizedUser();
+
+      // Blocked for CEO, allowed for super_admin
+      allow create, update: if isSuperAdmin() &&
+        isValidId(settingId) &&
+        request.resource.data.keys().hasAll(['serviceName', 'perSessionValue']) &&
+        request.resource.data.serviceName is string &&
+        request.resource.data.perSessionValue is number &&
+        request.resource.data.perSessionValue >= 0;
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 5. CACHED GEMINI AI EXECUTIVE BRIEFS (/ai_summaries/<summaryId>)
+    // Both super_admin and ceo can view and regenerate AI summaries
+    // =========================================================================
+    match /ai_summaries/{summaryId} {
+      allow get, list: if isAuthorizedUser();
+      allow create, update: if isAuthorizedUser() &&
+        isValidId(summaryId) &&
+        request.resource.data.keys().hasAll(['scopeKey', 'summaryText']) &&
+        request.resource.data.scopeKey is string &&
+        request.resource.data.summaryText is string;
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 6. LEGACY / FALLBACK WHITELIST (/allowedUsers/{userKey})
+    // Maintained for backward compatibility with previous build sessions
+    // =========================================================================
+    match /allowedUsers/{userKey} {
+      allow get, list: if isAuthorizedUser();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // Deny all other collections by default (Zero-Trust)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

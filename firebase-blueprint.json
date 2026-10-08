@@ -1,0 +1,161 @@
+{
+  "entities": {
+    "AllowedUser": {
+      "title": "Allowed User",
+      "description": "Authorized clinic executive or staff allowed to access CEO Pulse.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address in lowercase."
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: CEO, Owner, Executive, Doctor, Auditor.",
+          "enum": ["CEO", "Owner", "Executive", "Doctor", "Auditor", "Staff"]
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the user."
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "Whether the user is currently authorized."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when authorization was granted."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last modification."
+        }
+      },
+      "required": ["email", "role", "allowed"]
+    },
+    "UploadRecord": {
+      "title": "Upload Record",
+      "description": "Metadata for clinic spreadsheet uploads.",
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "description": "Unique identifier for the upload."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the uploaded spreadsheet."
+        },
+        "reportType": {
+          "type": "string",
+          "description": "SERVICE_SALES or PHARMACY_SALES."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Clinic branch location."
+        },
+        "reportDate": {
+          "type": "string",
+          "description": "Date of the report in YYYY-MM-DD."
+        },
+        "rowCount": {
+          "type": "number",
+          "description": "Number of rows parsed and imported."
+        },
+        "uploadedBy": {
+          "type": "string",
+          "description": "Email of the user who uploaded the file."
+        },
+        "uploadedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of upload completion."
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the upload: SUCCESS or FAILED."
+        }
+      },
+      "required": ["uploadId", "fileName", "reportType", "branch", "reportDate", "rowCount", "uploadedBy"]
+    },
+    "PackageSetting": {
+      "title": "Package Valuation Setting",
+      "description": "Rectification setting defining estimated cash value per package session.",
+      "type": "object",
+      "properties": {
+        "serviceName": {
+          "type": "string",
+          "description": "Normalized service name."
+        },
+        "perSessionValue": {
+          "type": "number",
+          "description": "Assigned economic value per session in currency units."
+        },
+        "category": {
+          "type": "string",
+          "description": "Clinical category: Skin, Obesity, Hair, Other."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of setting update."
+        }
+      },
+      "required": ["serviceName", "perSessionValue"]
+    },
+    "AiSummary": {
+      "title": "AI Executive Summary",
+      "description": "Cached Gemini executive insights for a specific filter date and branch scope.",
+      "type": "object",
+      "properties": {
+        "scopeKey": {
+          "type": "string",
+          "description": "Unique composite key: branch_datePreset_customDates."
+        },
+        "summaryText": {
+          "type": "string",
+          "description": "Comprehensive executive summary paragraph."
+        },
+        "keyObservations": {
+          "type": "string",
+          "description": "Bulleted observations from the metrics."
+        },
+        "strategicRisks": {
+          "type": "string",
+          "description": "Strategic risks and actionable recommendations."
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of generation."
+        }
+      },
+      "required": ["scopeKey", "summaryText"]
+    }
+  },
+  "firestore": {
+    "/allowedUsers/{userKey}": {
+      "schema": "AllowedUser",
+      "description": "Whitelist of authorized users permitted to access clinic data."
+    },
+    "/upload_history/{uploadId}": {
+      "schema": "UploadRecord",
+      "description": "Audit trail of spreadsheet upload events."
+    },
+    "/raw_uploads/{rowId}": {
+      "schema": { "$ref": "#/entities/UploadRecord" },
+      "description": "Individual parsed spreadsheet data rows."
+    },
+    "/package_settings/{settingId}": {
+      "schema": "PackageSetting",
+      "description": "Per-service package valuation rectification overrides."
+    },
+    "/ai_summaries/{summaryId}": {
+      "schema": "AiSummary",
+      "description": "Cached Gemini executive briefings."
+    }
+  }
+}

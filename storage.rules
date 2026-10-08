@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return request.auth.token.email != null ? request.auth.token.email.lower() : '';
+    }
+
+    // Role check from Firestore roles collection
+    function isSuperAdmin() {
+      return isSignedIn() && authEmail() != '' &&
+        firestore.exists(/databases/(default)/documents/roles/$(authEmail())) &&
+        firestore.get(/databases/(default)/documents/roles/$(authEmail())).data.role == 'super_admin';
+    }
+
+    function isCeo() {
+      return isSignedIn() && authEmail() != '' &&
+        firestore.exists(/databases/(default)/documents/roles/$(authEmail())) &&
+        firestore.get(/databases/(default)/documents/roles/$(authEmail())).data.role == 'ceo';
+    }
+
+    function isAuthorizedUser() {
+      return isSuperAdmin() || isCeo();
+    }
+
+    // Upload spreadsheet files (e.g. /uploads/{uploadId}/{fileName})
+    match /uploads/{allPaths=**} {
+      // Both super_admin and ceo can read/download uploaded report assets
+      allow read: if isAuthorizedUser();
+
+      // Write (upload) and delete are strictly blocked for CEO, allowed ONLY for super_admin
+      allow write, delete: if isSuperAdmin();
+    }
+
+    // Deny all other storage paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
